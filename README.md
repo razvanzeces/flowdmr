@@ -112,6 +112,48 @@ sequence, the wire protocol, and the timing model.
 
 ---
 
+## Testing on real hardware — do it in stages
+
+Bring it up one layer at a time so a failure points at one thing.
+
+### Stage A — TETRA injection, WITHOUT any DMR/RTL-SDR
+Prove the FlowStation side works using the built-in synthetic injector. With
+FlowStation running (`--features flowdmr`) and a TETRA radio attached to the
+injection TalkGroup, send a 1 kHz tone:
+
+```sh
+flowdmr-sidecar test-inject --tg 5000 --src 2604123 --secs 5 --tone 1000
+# or play a real clip (8 kHz mono 16-bit WAV):
+flowdmr-sidecar test-inject --tg 5000 --wav hello-8k-mono.wav
+```
+**Success:** your TETRA radio receives a group call on TG 5000 from ISSI
+`9000000 + (2604123 % 1000)` and you hear the tone / clip.
+If not: check FlowStation logs for `FlowDMR local injector enabled`, that
+`5000 ∈ [cell] local_ssi_ranges`, that Brew is disabled, and that a radio is
+actually camped on that group. (Make a WAV with `ffmpeg -i in.mp3 -ac 1 -ar 8000 -sample_fmt s16 hello-8k-mono.wav`.)
+
+### Stage B — DMR decode, WITHOUT FlowStation
+Prove the RTL-SDR + dsd-neo path on a known-active DMR frequency:
+
+```sh
+dsd-neo -fs -nm -i rtl:0:439.0000M:0:0:12:0:2 -o udp:127.0.0.1:23470
+```
+**Success:** dsd-neo prints sync + per-call lines with Source/Target and decodes
+audio. Note the EXACT wording of the source/talkgroup lines — if it differs from
+the defaults, copy it and adjust `re_source` / `re_talkgroup` / `re_call_end` in
+`sidecar.toml`.
+
+### Stage C — full chain
+Start the sidecar (it launches dsd-neo) and key up a DMR radio on that frequency:
+
+```sh
+flowdmr-sidecar --config /etc/flowdmr/sidecar.toml   # dashboard at :8081
+```
+Watch the dashboard: `decoder running`, `Call LIVE`, a `Source ID`, rising
+`PCM frames`. **Success:** the DMR transmission comes out on your TETRA radio.
+
+---
+
 ## Two integration modes
 
 - **Default — Brew impersonation** (smallest footprint): the entity registers as

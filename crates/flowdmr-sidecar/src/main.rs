@@ -19,6 +19,7 @@ mod meta;
 mod pcm;
 mod session;
 mod status;
+mod testinject;
 mod wire;
 
 use std::sync::{Arc, Mutex};
@@ -37,8 +38,14 @@ fn main() {
         )
         .init();
 
+    // Subcommand: `test-inject` sends a synthetic call to the entity and exits.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("test-inject") {
+        std::process::exit(testinject::run(argv.into_iter().skip(1)));
+    }
+
     let mut config_path: Option<String> = None;
-    let mut args = std::env::args().skip(1);
+    let mut args = argv.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--config" | "-c" => config_path = args.next(),
