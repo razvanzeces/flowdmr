@@ -312,7 +312,9 @@ impl Core {
                 Sap::TmdSap,
                 SELF_ENTITY,
                 TetraEntity::Umac,
-                SapMsgInner::TmdCircuitDataReq(TmdCircuitDataReq { ts, data }),
+                // carrier_num: 0 = primary carrier (single-carrier cell). For a
+                // multi-carrier cell, echo the carrier from NetworkCallReady.
+                SapMsgInner::TmdCircuitDataReq(TmdCircuitDataReq { ts, data, carrier_num: 0 }),
             ));
         }
         for (stream_id, uuid) in to_release {
@@ -412,7 +414,7 @@ impl TetraEntityTrait for FlowDmrEntity {
 
     fn rx_prim(&mut self, queue: &mut MessageQueue, message: SapMsg) {
         match message.msg {
-            SapMsgInner::CmceCallControl(CallControl::NetworkCallReady { brew_uuid, call_id, ts, usage }) => {
+            SapMsgInner::CmceCallControl(CallControl::NetworkCallReady { brew_uuid, call_id, ts, usage, .. }) => {
                 self.core.on_network_call_ready(queue, brew_uuid, call_id, ts, usage)
             }
             SapMsgInner::CmceCallControl(CallControl::NetworkCallEnd { brew_uuid }) => {
