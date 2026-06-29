@@ -82,10 +82,18 @@ cargo run -p flowdmr-sidecar -- --config sidecar.toml
    ```sh
    sudo ./deploy/install-dsd-neo.sh
    ```
-3. **Patch + build FlowStation with FlowDMR** (real ACELP codec via pkg-config):
+3. **TETRA ACELP codec** (open-source, the one FlowStation itself uses — ETSI EN 300 395-2
+   packaged by [outerplane/tetra-codec](https://github.com/outerplane/tetra-codec)). Needed
+   for audible output:
    ```sh
-   ./integration/apply.sh /path/to/flowstation
-   cd /path/to/flowstation && cargo build --release --features flowdmr
+   sudo ./deploy/build-tetra-codec.sh
+   ```
+4. **Patch + build FlowStation with FlowDMR** (coexists with a live Brew):
+   ```sh
+   ./integration/apply.sh /path/to/flowstation        # applies the CMCE coexist patch too
+   cd /path/to/flowstation && cargo build --release --features flowdmr   # real codec
+   # No tetra-codec yet? Test the wiring (silent) with:
+   #   cargo build --release --features 'flowdmr flowdmr-codec-stub'
    ```
 4. **Configure** a local TalkGroup. The injection GSSI **must** be inside the cell's
    `local_ssi_ranges` in FlowStation's config — that is what guarantees the traffic
