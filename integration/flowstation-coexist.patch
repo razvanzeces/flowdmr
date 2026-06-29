@@ -1,0 +1,109 @@
+diff --git a/crates/tetra-core/src/tetra_entities.rs b/crates/tetra-core/src/tetra_entities.rs
+index c2b9caf..591ab0e 100644
+--- a/crates/tetra-core/src/tetra_entities.rs
++++ b/crates/tetra-core/src/tetra_entities.rs
+@@ -29,4 +29,7 @@ pub enum TetraEntity {
+ 
+     /// Asterisk SIP/RTP bridge
+     Asterisk,
++
++    /// FlowDMR local DMR->TETRA injector (private companion; injects local group calls)
++    FlowDmr,
+ }
+diff --git a/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/group.rs b/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/group.rs
+index aa28d73..5628fed 100644
+--- a/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/group.rs
++++ b/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/group.rs
+@@ -295,6 +295,7 @@ impl CcBsSubentity {
+     pub(in crate::cmce::subentities::cc_bs) fn fsm_group_on_network_call_start(
+         &mut self,
+         queue: &mut MessageQueue,
++        network_entity: TetraEntity,
+         call_id: u16,
+         brew_uuid: uuid::Uuid,
+         source_issi: u32,
+@@ -328,7 +329,7 @@ impl CcBsSubentity {
+         queue.push_back(SapMsg {
+             sap: Sap::Control,
+             src: TetraEntity::Cmce,
+-            dest: TetraEntity::Brew,
++            dest: network_entity,
+             msg: SapMsgInner::CmceCallControl(CallControl::NetworkCallReady {
+                 brew_uuid,
+                 call_id,
+diff --git a/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/isi.rs b/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/isi.rs
+index d702d0e..b85e0d0 100644
+--- a/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/isi.rs
++++ b/crates/tetra-entities/src/cmce/subentities/cc_bs/procedures/isi.rs
+@@ -692,6 +692,7 @@ impl CcBsSubentity {
+     pub(in crate::cmce::subentities::cc_bs) fn fsm_on_network_call_start(
+         &mut self,
+         queue: &mut MessageQueue,
++        network_entity: TetraEntity,
+         brew_uuid: uuid::Uuid,
+         source_issi: u32,
+         dest_gssi: u32,
+@@ -701,7 +702,12 @@ impl CcBsSubentity {
+         // inbound predicate which — unlike is_brew_gssi_routable — must NOT apply the
+         // outbound whitelist (see brew_routable::is_brew_inbound_allowed). A GSSI that
+         // is not admissible is dropped gracefully instead of crashing the base station.
+-        if !brew::is_brew_inbound_allowed(&self.config, dest_gssi) {
++        //
++        // FlowDMR is a LOCAL injector: it deliberately targets local_ssi_ranges (so its
++        // traffic never routes to Brew), which is exactly what the inbound predicate
++        // rejects for real Brew traffic. Bypass the predicate for FlowDmr only — every
++        // other originator (Brew) keeps the original behaviour.
++        if network_entity != TetraEntity::FlowDmr && !brew::is_brew_inbound_allowed(&self.config, dest_gssi) {
+             tracing::info!(
+                 "CMCE: ignoring network call start uuid={} gssi={} (inbound not allowed)",
+                 brew_uuid,
+@@ -737,7 +743,7 @@ impl CcBsSubentity {
+                 old_speaker
+             );
+ 
+-            if let Err(err) = self.fsm_group_on_network_call_start(queue, call_id, brew_uuid, source_issi) {
++            if let Err(err) = self.fsm_group_on_network_call_start(queue, network_entity, call_id, brew_uuid, source_issi) {
+                 match err {
+                     GroupTransitionError::UnknownCall(_) => {
+                         tracing::warn!(
+@@ -918,7 +924,7 @@ impl CcBsSubentity {
+         queue.push_back(SapMsg {
+             sap: Sap::Control,
+             src: TetraEntity::Cmce,
+-            dest: TetraEntity::Brew,
++            dest: network_entity,
+             msg: SapMsgInner::CmceCallControl(CallControl::NetworkCallReady {
+                 brew_uuid,
+                 call_id,
+diff --git a/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/isi.rs b/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/isi.rs
+index 9e7e66b..11231e0 100644
+--- a/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/isi.rs
++++ b/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/isi.rs
+@@ -134,12 +134,13 @@ impl CcBsSubentity {
+     pub(super) fn rx_network_call_start(
+         &mut self,
+         queue: &mut MessageQueue,
++        network_entity: TetraEntity,
+         brew_uuid: uuid::Uuid,
+         source_issi: u32,
+         dest_gssi: u32,
+         priority: u8,
+     ) {
+-        self.fsm_on_network_call_start(queue, brew_uuid, source_issi, dest_gssi, priority);
++        self.fsm_on_network_call_start(queue, network_entity, brew_uuid, source_issi, dest_gssi, priority);
+     }
+ 
+     /// Handle network call end request
+diff --git a/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/ra.rs b/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/ra.rs
+index d47439c..1f233e8 100644
+--- a/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/ra.rs
++++ b/crates/tetra-entities/src/cmce/subentities/cc_bs/routes/ra.rs
+@@ -17,7 +17,7 @@ impl CcBsSubentity {
+                 dest_gssi,
+                 priority,
+             } => {
+-                self.rx_network_call_start(queue, brew_uuid, source_issi, dest_gssi, priority);
++                self.rx_network_call_start(queue, src_entity, brew_uuid, source_issi, dest_gssi, priority);
+             }
+             CallControl::NetworkCallEnd { brew_uuid } => {
+                 self.rx_network_call_end(queue, brew_uuid);

@@ -25,10 +25,25 @@ echo "FlowStation: $FS"
 cp -n "$CARGO" "$CARGO.flowdmr.bak"
 cp -n "$MAIN"  "$MAIN.flowdmr.bak"
 
-# 1) Cargo features (after the asterisk feature line)
+# 0) CMCE coexist patch: adds TetraEntity::FlowDmr and lets a FlowDmr-originated
+#    local group call bypass the Brew-inbound gate + receive its replies. Brew is
+#    byte-for-byte unaffected (changes are gated on the originating entity).
+if ! grep -q "FlowDmr" "$FS/crates/tetra-core/src/tetra_entities.rs"; then
+  if git -C "$FS" apply --check "$HERE/flowstation-coexist.patch" 2>/dev/null; then
+    git -C "$FS" apply "$HERE/flowstation-coexist.patch"
+    echo "  + CMCE coexist patch applied (TetraEntity::FlowDmr)"
+  else
+    echo "  ! coexist patch did not apply cleanly (FlowStation version drift?)."
+    echo "    Apply integration/flowstation-coexist.patch by hand, or ask for a refreshed patch."
+    exit 1
+  fi
+fi
+
+# 1) Cargo features (after the asterisk feature line). Coexist mode needs the
+#    entity's dedicated-entity identity.
 if ! grep -q '^flowdmr = ' "$CARGO"; then
-  perl -0777 -pi -e 's{(asterisk = \["tetra-entities/asterisk"\]\n)}{$1flowdmr = ["dep:flowdmr-entity"]\nflowdmr-codec-stub = ["flowdmr-entity/codec-stub"]\n}' "$CARGO"
-  echo "  + Cargo.toml: features flowdmr, flowdmr-codec-stub"
+  perl -0777 -pi -e 's{(asterisk = \["tetra-entities/asterisk"\]\n)}{$1flowdmr = ["dep:flowdmr-entity", "flowdmr-entity/dedicated-entity"]\nflowdmr-codec-stub = ["flowdmr-entity/codec-stub"]\n}' "$CARGO"
+  echo "  + Cargo.toml: features flowdmr (dedicated-entity), flowdmr-codec-stub"
 fi
 
 # 2) Optional path dependency (after the tetra-entities dependency line)

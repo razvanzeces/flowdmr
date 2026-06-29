@@ -1,9 +1,22 @@
-# Running FlowDMR alongside a live Brew (advanced)
+# Coexist mode — FlowDMR + a live Brew (now the default, auto-applied)
 
-The **default** FlowDMR build registers its entity under `TetraEntity::Brew`
-(impersonation). That needs zero changes to FlowStation's protocol code, but it
-means **you cannot run the real Brew interconnect at the same time** — which is
-fine for a purely local cell.
+**This is required, not optional.** CMCE refuses a network-originated group call
+on a GSSI inside `local_ssi_ranges` (`is_brew_inbound_allowed` returns false — it
+stops real Brew traffic leaking into local-only groups). FlowDMR deliberately
+injects on a local GSSI, so it hits that same gate. The fix gives FlowDMR its own
+`TetraEntity::FlowDmr` identity and lets *only* FlowDmr-originated calls bypass
+that gate and receive their replies. Every other originator (Brew) is byte-for-byte
+unaffected.
+
+`integration/apply.sh` applies this automatically via
+`integration/flowstation-coexist.patch` (verified to build against FlowStation
+v0.3.8). The notes below document what that patch does, for review. The old
+"impersonate Brew" mode does NOT work for local injection (the gate above blocks
+it) and has been retired.
+
+---
+
+### Historical note (the manual edits the patch performs)
 
 If you want FlowDMR **and** a live Brew/BrandMeister interconnect at once, give
 FlowDMR its own entity identity. This requires a small, local patch to
