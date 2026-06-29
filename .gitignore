@@ -1,0 +1,7 @@
+target/
+**/*.rs.bk
+*.flowdmr.bak
+# standalone lock for the entity crate (regenerated; flowstation's lock governs the real build)
+/crates/flowdmr-entity/Cargo.lock
+# local runtime config with your frequencies/TG
+/sidecar.local.toml

@@ -1,0 +1,23 @@
+dsd_bin = "dsd-neo"
+dsd_mode_args = [
+    "-fs",
+    "-nm",
+]
+dsd_extra_args = []
+rtl_device = 0
+rtl_bandwidth_khz = 12
+squelch = 0
+volume = 2
+dsd_pcm_port = 23470
+entity_addr = "127.0.0.1:23471"
+dashboard_bind = "127.0.0.1:8081"
+silence_timeout_ms = 1200
+re_source = '(?i)\b(?:source|src)\D{0,4}(\d{2,8})'
+re_talkgroup = '(?i)\b(?:target|group|tg|tgt)\D{0,4}(\d{1,8})'
+re_call_end = '(?i)(no sync|sync:\s*no|call end|terminator|voice end)'
+
+[live]
+rx_freq_hz = 439000000
+gain_db = 0.0
+ppm = 0
+injection_tg = 5000

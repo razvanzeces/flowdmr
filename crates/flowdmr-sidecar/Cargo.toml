@@ -1,0 +1,18 @@
+[package]
+name = "flowdmr-sidecar"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FlowDMR sidecar: RTL-SDR DMR receiver (dsd-neo) -> local TETRA injection + mini-dashboard"
+
+[[bin]]
+name = "flowdmr-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+flowdmr-ipc = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+regex = "1"

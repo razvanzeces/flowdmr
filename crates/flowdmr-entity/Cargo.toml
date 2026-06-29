@@ -1,0 +1,47 @@
+[package]
+name = "flowdmr-entity"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "FlowStation-side entity that injects DMR audio as a local TETRA group call"
+
+# Standalone crate (excluded from the flowdmr workspace). Compiled into
+# bluestation-bs as a path dependency; see integration/apply.sh.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PATH DEPENDENCIES on the FlowStation workspace.
+# Assumes `flowstation` is a sibling directory of `flowdmr`. Adjust if needed.
+# ─────────────────────────────────────────────────────────────────────────────
+[dependencies]
+flowdmr-ipc = { path = "../flowdmr-ipc" }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+tetra-core = { path = "../../../flowstation/crates/tetra-core" }
+tetra-saps = { path = "../../../flowstation/crates/tetra-saps" }
+tetra-config = { path = "../../../flowstation/crates/tetra-config" }
+tetra-entities = { path = "../../../flowstation/crates/tetra-entities" }
+
+[features]
+# Default build links the real native ACELP codec (`libtetra-codec`, resolved via
+# pkg-config). This is what you build on the Raspberry Pi / device.
+default = ["real-codec"]
+
+# Real native ACELP codec via FFI + pkg-config. Requires libtetra-codec installed.
+real-codec = []
+
+# Pure-Rust no-op vocoder. Builds anywhere with no native lib (CI / laptop dev).
+# Produces silent ACELP blocks so the full pipeline, pacing, SAP sequence and
+# wire protocol can be exercised without the proprietary codec.
+codec-stub = []
+
+# Register under a dedicated `TetraEntity::FlowDmr` identity instead of
+# impersonating `TetraEntity::Brew`. Requires the OPTIONAL "coexist with Brew"
+# patch (integration/flowstation-coexist.patch) that adds the enum variant and
+# makes CMCE echo the originating entity. Lets FlowDMR run alongside a live Brew.
+dedicated-entity = []
+
+[build-dependencies]
+
+[lib]
+crate-type = ["lib"]

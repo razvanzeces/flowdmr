@@ -1,0 +1,42 @@
+# FlowDMR — private DMR→TETRA local-injection bridge for FlowStation.
+#
+# This is a SEPARATE workspace from FlowStation. It must NEVER be committed to
+# the public FlowStation repo (github.com/razvanzeces/flowstation).
+#
+# Layout assumption: this directory sits as a SIBLING of the `flowstation` repo:
+#
+#   TETRA/
+#   ├── flowstation/      (public repo)
+#   └── flowdmr/          (this repo — private)
+#
+# The `flowdmr-entity` crate path-depends on FlowStation's library crates via
+# ../flowstation/crates/*. If your FlowStation checkout lives elsewhere, edit the
+# paths in crates/flowdmr-entity/Cargo.toml.
+[workspace]
+resolver = "2"
+members = [
+    "crates/flowdmr-ipc",
+    "crates/flowdmr-sidecar",
+]
+# flowdmr-entity is a STANDALONE crate, not a workspace member: it path-depends on
+# FlowStation's crates and is compiled INTO bluestation-bs (via integration/apply.sh).
+# Excluding it keeps `cargo build` here working WITHOUT a FlowStation checkout — so
+# you can `git pull` and build the sidecar on its own.
+exclude = [
+    "crates/flowdmr-entity",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Razvan Zeces / YO6RZV"]
+license = "MIT"
+
+[workspace.dependencies]
+flowdmr-ipc = { path = "crates/flowdmr-ipc" }
+tracing = { version = "0.1", features = ["std"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
