@@ -8,10 +8,10 @@ ACELP, and injects it into your FlowStation cell as a **local group call** on a
 TalkGroup you choose. It runs as a separate process next to FlowStation on the same
 Raspberry Pi.
 
-> ⚠️ **Private — keep out of the public FlowStation repo.** FlowDMR is a separate
-> workspace. It must never be committed/pushed to `github.com/razvanzeces/flowstation`.
-> The only touch-point is a small, local, **un-committed** patch applied by
-> `integration/apply.sh` (revertible with `integration/revert.sh`).
+> ℹ️ **Separate repo, not a fork.** FlowDMR is its own workspace and is never
+> committed *into* the FlowStation tree. Its only touch-point is a small, local
+> patch applied by `integration/apply.sh` to your FlowStation checkout (revert with
+> `integration/revert.sh`). Build it next to a FlowStation checkout (see below).
 
 ```
   DMR off-air ──▶ RTL-SDR V4 (RX) ──▶ dsd-neo (AMBE→PCM + SRC/TG)
