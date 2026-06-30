@@ -30,10 +30,12 @@ pub fn run(
     let socket = UdpSocket::bind(("127.0.0.1", port))?;
     tracing::info!("flowdmr-sidecar: PCM ingest listening on 127.0.0.1:{port}");
     let mut buf = [0u8; 4096];
+    let mut bytebuf: Vec<u8> = Vec::with_capacity(8192);
     let mut acc: Vec<i16> = Vec::with_capacity(PCM_SAMPLES_PER_FRAME * 4);
     let gain = cfg.static_cfg.pcm_gain;
     let apply_gain = (gain - 1.0).abs() > 1e-4;
     let stereo = cfg.static_cfg.dsd_audio_stereo;
+    let unit = if stereo { 4 } else { 2 }; // bytes consumed per emitted sample
 
     loop {
         let len = match socket.recv(&mut buf) {
@@ -43,9 +45,17 @@ pub fn run(
                 continue;
             }
         };
-        // Extract mono samples (left channel if the decoder emits stereo),
-        // optionally attenuating for ACELP headroom.
-        extract_samples(&buf[..len], stereo, gain, apply_gain, &mut acc);
+        // Buffer raw bytes and consume only WHOLE L/R frames, carrying any
+        // partial frame to the next datagram. Without this, a packet that splits
+        // mid-pair would swap L/R for a burst — audible as a garbled/"encrypted"
+        // patch until the stream re-aligned. Take the left channel (stereo) or
+        // every sample (mono), optionally attenuating for ACELP headroom.
+        bytebuf.extend_from_slice(&buf[..len]);
+        let usable = (bytebuf.len() / unit) * unit;
+        if usable > 0 {
+            extract_samples(&bytebuf[..usable], stereo, gain, apply_gain, &mut acc);
+            bytebuf.drain(..usable);
+        }
 
         while acc.len() >= PCM_SAMPLES_PER_FRAME {
             let frame: Vec<i16> = acc.drain(..PCM_SAMPLES_PER_FRAME).collect();
