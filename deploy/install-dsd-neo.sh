@@ -35,7 +35,11 @@ ldconfig
 echo "==> dsd-neo"
 rm -rf "$SRC/dsd-neo"
 git clone --depth 1 https://github.com/arancormonk/dsd-neo "$SRC/dsd-neo"
-cmake -S "$SRC/dsd-neo" -B "$SRC/dsd-neo/build" -DCMAKE_BUILD_TYPE=Release
+# BUILD_TESTING=OFF skips the test targets (some trip -Werror=unused-parameter on
+# this toolchain); DSD_WARNINGS_AS_ERRORS=OFF keeps a stray warning from failing
+# the real build. We only need the dsd-neo binary.
+cmake -S "$SRC/dsd-neo" -B "$SRC/dsd-neo/build" -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_TESTING=OFF -DDSD_WARNINGS_AS_ERRORS=OFF
 cmake --build "$SRC/dsd-neo/build" -j"$(nproc)"
 cmake --install "$SRC/dsd-neo/build"
 ldconfig
