@@ -191,7 +191,7 @@ mod tests {
 
         let args = build_args(&shared);
         let joined = args.join(" ");
-        assert!(joined.contains("-i rtl:0:439.0000M:0:0:24:0:2"), "got: {joined}");
+        assert!(joined.contains("-i rtl:0:439.0000M:0:0:24:0:1"), "got: {joined}");
         assert!(joined.contains("-o udp:127.0.0.1:23470"), "got: {joined}");
         assert!(joined.starts_with("-fs -nm"), "mode args first: {joined}");
     }
