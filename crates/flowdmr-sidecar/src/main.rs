@@ -17,6 +17,7 @@ mod dashboard;
 mod decoder;
 mod meta;
 mod pcm;
+mod recorder;
 mod session;
 mod status;
 mod testinject;
@@ -93,6 +94,13 @@ fn main() {
     let status = SharedStatus::new();
     let log = SharedLog::new(200);
     let cm = Arc::new(Mutex::new(CallManager::new(shared.static_cfg.fixed_source_id)));
+    if shared.static_cfg.record_enabled {
+        let rec = recorder::Recorder::new(&shared.static_cfg.record_dir, shared.static_cfg.record_min_secs);
+        if rec.enabled() {
+            tracing::info!("flowdmr-sidecar: recording calls to {}", shared.static_cfg.record_dir);
+            cm.lock().expect("cm lock").set_recorder(rec);
+        }
+    }
     let start = Instant::now();
 
     let base_sink = match UdpSink::connect(&shared.static_cfg.entity_addr) {

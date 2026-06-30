@@ -10,6 +10,7 @@
 use flowdmr_ipc::{FlowDmrBody, FlowDmrFrame, VOICE_FLAG_FIRST};
 
 use crate::meta::MetaLine;
+use crate::recorder::Recorder;
 
 /// Sink for outbound IPC frames (UDP in production, a Vec in tests).
 pub trait FrameSink {
@@ -26,7 +27,6 @@ struct Session {
 }
 
 /// Reconciles metadata + PCM into IPC frames for one active call at a time.
-#[derive(Default)]
 pub struct CallManager {
     session: Option<Session>,
     next_stream_id: u32,
@@ -35,11 +35,23 @@ pub struct CallManager {
     /// changes are suppressed — one stable speaker on the TG instead of a churn
     /// of every decoded DMR id. 0 = pass through the decoded per-talker ids.
     fixed_source_id: u32,
+    recorder: Recorder,
 }
 
 impl CallManager {
     pub fn new(fixed_source_id: u32) -> Self {
-        Self { session: None, next_stream_id: 1, calls_started: 0, fixed_source_id }
+        Self {
+            session: None,
+            next_stream_id: 1,
+            calls_started: 0,
+            fixed_source_id,
+            recorder: Recorder::disabled(),
+        }
+    }
+
+    /// Attach a call recorder (writes a WAV per call). Disabled by default.
+    pub fn set_recorder(&mut self, recorder: Recorder) {
+        self.recorder = recorder;
     }
 
     pub fn has_active_call(&self) -> bool {
@@ -64,6 +76,8 @@ impl CallManager {
         if m.source.is_none() && m.talkgroup.is_none() {
             return;
         }
+        // Refine the recording's filename metadata with the real decoded ids.
+        self.recorder.note_meta(m.source, m.talkgroup);
 
         let fixed = self.fixed_source_id;
         match self.session.as_mut() {
@@ -97,6 +111,7 @@ impl CallManager {
             // arrives shortly via on_meta -> SrcChange.
             self.start_call(0, 0, target_gssi, now_ms, sink);
         }
+        self.recorder.write(&pcm); // archive the call audio
         let sess = self.session.as_mut().expect("session present");
         sess.last_pcm_ms = now_ms;
         let flags = if sess.first_voice_pending {
@@ -127,6 +142,8 @@ impl CallManager {
     }
 
     fn start_call<S: FrameSink>(&mut self, source_id: u32, dmr_tg: u32, target_gssi: u32, now_ms: u64, sink: &mut S) {
+        // Record the REAL decoded ids (before the fixed-id override used for injection).
+        self.recorder.start(source_id, dmr_tg);
         // A fixed source id overrides the decoded one (including the provisional 0).
         let source_id = if self.fixed_source_id != 0 { self.fixed_source_id } else { source_id };
         let stream_id = self.next_stream_id;
@@ -147,6 +164,7 @@ impl CallManager {
     }
 
     fn end_call<S: FrameSink>(&mut self, sink: &mut S) {
+        self.recorder.finish();
         if let Some(sess) = self.session.take() {
             sink.send(FlowDmrFrame::new(sess.stream_id, FlowDmrBody::CallEnd));
         }

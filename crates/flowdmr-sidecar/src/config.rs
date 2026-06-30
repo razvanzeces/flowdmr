@@ -68,6 +68,14 @@ pub struct Config {
     /// Address of the FlowStation FlowDMR entity (its `FLOWDMR_LISTEN`).
     pub entity_addr: String,
 
+    // ── Call recording ─────────────────────────────────────────────────────
+    /// Record every call to a per-call WAV file (8 kHz/16-bit/mono).
+    pub record_enabled: bool,
+    /// Directory for the .wav files (created if missing). ~1 MB per minute of call.
+    pub record_dir: String,
+    /// Skip recordings shorter than this (drops PTT blips).
+    pub record_min_secs: f32,
+
     // ── Mini-dashboard ─────────────────────────────────────────────────────
     /// Bind address for the control dashboard. 0.0.0.0 = reachable from the LAN
     /// (e.g. http://<pi-ip>:8081). NOTE: no auth — only expose on a trusted
@@ -109,6 +117,9 @@ impl Default for Config {
             pcm_gain: 1.0,
             dsd_pcm_port: 23470,
             entity_addr: "127.0.0.1:23471".to_string(),
+            record_enabled: true,
+            record_dir: "/var/lib/flowdmr/recordings".to_string(),
+            record_min_secs: 1.0,
             dashboard_bind: "0.0.0.0:8081".to_string(),
             silence_timeout_ms: 1200,
             fixed_source_id: 1,

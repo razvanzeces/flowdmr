@@ -52,6 +52,10 @@ fn handle(mut stream: TcpStream, cfg: &SharedConfig, status: &SharedStatus, log:
             respond(&mut stream, "200 OK", "application/json", &body)
         }
         ("GET", "/api/log") => respond(&mut stream, "200 OK", "text/plain; charset=utf-8", &log.tail(120)),
+        ("GET", "/api/recordings") => {
+            respond(&mut stream, "200 OK", "application/json", &recordings_json(cfg))
+        }
+        ("GET", p) if p.starts_with("/rec/") => serve_recording(&mut stream, cfg, &p[5..]),
         ("POST", "/api/control") => {
             let body = req.split("\r\n\r\n").nth(1).unwrap_or("");
             apply_control(cfg, body);
@@ -68,6 +72,40 @@ fn respond(stream: &mut TcpStream, code: &str, content_type: &str, body: &str) -
         body.len()
     );
     stream.write_all(resp.as_bytes())
+}
+
+fn respond_bytes(stream: &mut TcpStream, content_type: &str, extra: &str, body: &[u8]) -> std::io::Result<()> {
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes())?;
+    stream.write_all(body)
+}
+
+fn recordings_json(cfg: &SharedConfig) -> String {
+    let dir = std::path::Path::new(&cfg.static_cfg.record_dir);
+    let items: Vec<String> = crate::recorder::list_recordings(dir, 200)
+        .into_iter()
+        .map(|(name, size)| format!("{{\"name\":\"{}\",\"size\":{}}}", json_escape(&name), size))
+        .collect();
+    format!("[{}]", items.join(","))
+}
+
+/// Serve a recording for download. The name is sanitised to its basename so it
+/// can't escape the recordings directory.
+fn serve_recording(stream: &mut TcpStream, cfg: &SharedConfig, name: &str) -> std::io::Result<()> {
+    if name.is_empty() || name.contains('/') || name.contains("..") || !name.ends_with(".wav") {
+        return respond(stream, "400 Bad Request", "text/plain", "bad name");
+    }
+    let path = std::path::Path::new(&cfg.static_cfg.record_dir).join(name);
+    match std::fs::read(&path) {
+        Ok(bytes) => {
+            let cd = format!("Content-Disposition: attachment; filename=\"{name}\"\r\n");
+            respond_bytes(stream, "audio/wav", &cd, &bytes)
+        }
+        Err(_) => respond(stream, "404 Not Found", "text/plain", "not found"),
+    }
 }
 
 fn apply_control(cfg: &SharedConfig, body: &str) {
@@ -191,6 +229,12 @@ const PAGE: &str = r##"<!doctype html>
  .logcard{margin-top:16px}
  pre.log{margin:0;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;height:320px;overflow:auto;
    font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#c9d4e0;white-space:pre-wrap;word-break:break-word}
+ .recs{display:flex;flex-direction:column;max-height:300px;overflow:auto}
+ .rec{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid var(--line)}
+ .rec .nm{font:12px/1.3 ui-monospace,Menlo,Consolas,monospace;color:#c9d4e0;word-break:break-all}
+ .rec .right{display:flex;gap:8px;align-items:center;white-space:nowrap}
+ .rec .sz{color:var(--mut);font-size:11px}
+ .rec a,.rec button.play{color:var(--acc);text-decoration:none;background:none;border:0;cursor:pointer;font-size:14px;padding:0 2px}
  @media(max-width:640px){.grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
  <h1>FlowDMR</h1><p class="sub">DMR → TETRA local injector — control panel</p>
@@ -220,6 +264,10 @@ const PAGE: &str = r##"<!doctype html>
   </div>
  </div>
  <div class="card logcard"><h2>Live decoder log (dsd-neo)</h2><pre class="log" id="log">waiting for decoder…</pre></div>
+ <div class="card logcard"><h2>Recordings</h2>
+  <audio id="player" controls style="width:100%;margin-bottom:10px"></audio>
+  <div id="recs" class="recs">—</div>
+ </div>
 </div>
 <script>
 let dirty=false;
@@ -266,7 +314,19 @@ document.getElementById('f').addEventListener('submit',async e=>{
  const r=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b.toString()});
  dirty=false;render(await r.json());
 });
+async function pollRecs(){try{
+ const r=await (await fetch('/api/recordings')).json();
+ const el=document.getElementById('recs');
+ if(!r.length){el.textContent='no recordings yet';return;}
+ el.innerHTML=r.map(x=>{
+  const u='/rec/'+encodeURIComponent(x.name);
+  return '<div class="rec"><span class="nm">'+x.name+'</span><span class="right"><span class="sz">'
+   +(x.size/1024).toFixed(0)+' KB</span><button class="play" data-u="'+u+'">▶</button><a href="'+u+'" download>⬇</a></span></div>';
+ }).join('');
+ el.querySelectorAll('button.play').forEach(b=>b.onclick=()=>{const p=document.getElementById('player');p.src=b.dataset.u;p.play();});
+}catch(e){}}
 poll();setInterval(poll,500);
 pollLog();setInterval(pollLog,700);
+pollRecs();setInterval(pollRecs,3000);
 </script>
 </body></html>"##;

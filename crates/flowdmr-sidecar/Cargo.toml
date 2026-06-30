@@ -16,3 +16,4 @@ tracing-subscriber = { workspace = true }
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 regex = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
