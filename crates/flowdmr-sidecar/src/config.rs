@@ -69,6 +69,11 @@ pub struct Config {
     // ── Call detection ─────────────────────────────────────────────────────
     /// End a call after this many milliseconds with no PCM (silence).
     pub silence_timeout_ms: u64,
+    /// If non-zero, inject EVERYTHING as one stable speaker with this DMR source
+    /// id (talker changes suppressed) — clean single id on the TG instead of a
+    /// churn of every decoded id, which matters on busy multi-talkgroup systems.
+    /// Set to 0 to pass through the real per-talker ids.
+    pub fixed_source_id: u32,
 
     // ── Metadata parsing (tune for your dsd-neo build) ─────────────────────
     /// Regex capturing the DMR source/radio id (group 1). Applied to each
@@ -97,6 +102,7 @@ impl Default for Config {
             entity_addr: "127.0.0.1:23471".to_string(),
             dashboard_bind: "127.0.0.1:8081".to_string(),
             silence_timeout_ms: 1200,
+            fixed_source_id: 1,
             // Defaults tuned for common dsd-fme / dsd-neo console output. Adjust
             // for your build via the config file if metadata isn't picked up.
             re_source: r"(?i)\b(?:source|src)\D{0,4}(\d{2,8})".to_string(),

@@ -16,7 +16,7 @@ fn main() {
     let real_codec = std::env::var("CARGO_FEATURE_REAL_CODEC").is_ok();
     let stub = std::env::var("CARGO_FEATURE_CODEC_STUB").is_ok();
 
-    if !(real_codec && !stub) {
+    if !real_codec || stub {
         return;
     }
 

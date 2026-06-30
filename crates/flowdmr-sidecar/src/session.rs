@@ -31,11 +31,15 @@ pub struct CallManager {
     session: Option<Session>,
     next_stream_id: u32,
     calls_started: u64,
+    /// If non-zero, every injected call uses THIS single source id and talker
+    /// changes are suppressed — one stable speaker on the TG instead of a churn
+    /// of every decoded DMR id. 0 = pass through the decoded per-talker ids.
+    fixed_source_id: u32,
 }
 
 impl CallManager {
-    pub fn new() -> Self {
-        Self { session: None, next_stream_id: 1, calls_started: 0 }
+    pub fn new(fixed_source_id: u32) -> Self {
+        Self { session: None, next_stream_id: 1, calls_started: 0, fixed_source_id }
     }
 
     pub fn has_active_call(&self) -> bool {
@@ -61,6 +65,7 @@ impl CallManager {
             return;
         }
 
+        let fixed = self.fixed_source_id;
         match self.session.as_mut() {
             None => {
                 // Metadata-led call start (the common case: header precedes audio).
@@ -70,10 +75,14 @@ impl CallManager {
                 if let Some(tg) = m.talkgroup {
                     sess.dmr_tg = tg;
                 }
-                if let Some(src) = m.source {
-                    if src != sess.source_id {
-                        sess.source_id = src;
-                        sink.send(FlowDmrFrame::new(sess.stream_id, FlowDmrBody::SrcChange { source_id: src }));
+                // With a fixed source id we keep one stable speaker — never emit
+                // talker changes (each one flushes the jitter and re-grants the floor).
+                if fixed == 0 {
+                    if let Some(src) = m.source {
+                        if src != sess.source_id {
+                            sess.source_id = src;
+                            sink.send(FlowDmrFrame::new(sess.stream_id, FlowDmrBody::SrcChange { source_id: src }));
+                        }
                     }
                 }
             }
@@ -118,6 +127,8 @@ impl CallManager {
     }
 
     fn start_call<S: FrameSink>(&mut self, source_id: u32, dmr_tg: u32, target_gssi: u32, now_ms: u64, sink: &mut S) {
+        // A fixed source id overrides the decoded one (including the provisional 0).
+        let source_id = if self.fixed_source_id != 0 { self.fixed_source_id } else { source_id };
         let stream_id = self.next_stream_id;
         self.next_stream_id = self.next_stream_id.wrapping_add(1).max(1);
         self.calls_started = self.calls_started.wrapping_add(1);
@@ -161,7 +172,7 @@ mod tests {
 
     #[test]
     fn meta_led_call_then_voice_then_end() {
-        let mut cm = CallManager::new();
+        let mut cm = CallManager::new(0);
         let mut sink = VecSink::default();
 
         cm.on_meta(&MetaLine { source: Some(2_604_001), talkgroup: Some(9), call_end: false }, 5000, 0, &mut sink);
@@ -189,7 +200,7 @@ mod tests {
 
     #[test]
     fn pcm_before_meta_starts_provisional_then_srcchange() {
-        let mut cm = CallManager::new();
+        let mut cm = CallManager::new(0);
         let mut sink = VecSink::default();
         cm.on_pcm(pcm(), 5001, 0, &mut sink); // provisional CallStart (src 0) + Voice
         cm.on_meta(&MetaLine { source: Some(777), talkgroup: Some(9), call_end: false }, 5001, 20, &mut sink);
@@ -202,7 +213,7 @@ mod tests {
 
     #[test]
     fn silence_timeout_ends_call() {
-        let mut cm = CallManager::new();
+        let mut cm = CallManager::new(0);
         let mut sink = VecSink::default();
         cm.on_meta(&MetaLine { source: Some(1), talkgroup: Some(2), call_end: false }, 5000, 0, &mut sink);
         cm.on_pcm(pcm(), 5000, 0, &mut sink);
@@ -214,8 +225,24 @@ mod tests {
     }
 
     #[test]
+    fn fixed_source_id_one_speaker_no_srcchange() {
+        let mut cm = CallManager::new(7); // fixed id 7
+        let mut sink = VecSink::default();
+        cm.on_meta(&MetaLine { source: Some(100), talkgroup: Some(9), call_end: false }, 5000, 0, &mut sink);
+        cm.on_meta(&MetaLine { source: Some(200), talkgroup: Some(9), call_end: false }, 5000, 50, &mut sink);
+        // Exactly one CallStart with id 7, and NO SrcChange despite the id changing.
+        use flowdmr_ipc::FlowDmrKind::*;
+        let kinds: Vec<_> = sink.0.iter().map(|f| f.kind()).collect();
+        assert_eq!(kinds, vec![CallStart]);
+        match &sink.0[0].body {
+            FlowDmrBody::CallStart { source_id, .. } => assert_eq!(*source_id, 7),
+            _ => unreachable!(),
+        }
+    }
+
+    #[test]
     fn talker_change_within_call() {
-        let mut cm = CallManager::new();
+        let mut cm = CallManager::new(0);
         let mut sink = VecSink::default();
         cm.on_meta(&MetaLine { source: Some(100), talkgroup: Some(9), call_end: false }, 5000, 0, &mut sink);
         cm.on_meta(&MetaLine { source: Some(200), talkgroup: Some(9), call_end: false }, 5000, 50, &mut sink);

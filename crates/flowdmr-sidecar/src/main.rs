@@ -91,7 +91,7 @@ fn main() {
 
     let shared = SharedConfig::new(cfg, config_path);
     let status = SharedStatus::new();
-    let cm = Arc::new(Mutex::new(CallManager::new()));
+    let cm = Arc::new(Mutex::new(CallManager::new(shared.static_cfg.fixed_source_id)));
     let start = Instant::now();
 
     let base_sink = match UdpSink::connect(&shared.static_cfg.entity_addr) {

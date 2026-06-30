@@ -79,6 +79,9 @@ struct ActiveCall {
     priority: u8,
     /// Set once CMCE replies with `NetworkCallReady`.
     ts: Option<u8>,
+    /// Carrier the call was allocated on (from NetworkCallReady). Voice must be
+    /// sent on the SAME carrier or UMAC logs "unknown carrier" and mis-schedules.
+    carrier_num: u16,
     /// When the call was created (for the no-resource reaper).
     created_at: Instant,
     vocoder: Vocoder,
@@ -169,6 +172,7 @@ impl Core {
                 dest_gssi: target_gssi,
                 priority,
                 ts: None,
+                carrier_num: 0,
                 created_at: now,
                 vocoder,
                 jitter: VoiceJitterBuffer::with_initial_latency(self.settings.jitter_initial_latency_frames),
@@ -269,7 +273,7 @@ impl Core {
         let cur_ts = self.dltime.t;
         let now = Instant::now();
         let uuid_to_stream: HashMap<Uuid, u32> = self.stream_to_uuid.iter().map(|(s, u)| (*u, *s)).collect();
-        let mut sends: Vec<(u8, Vec<u8>)> = Vec::new();
+        let mut sends: Vec<(u8, u16, Vec<u8>)> = Vec::new();
         let mut to_release: Vec<(u32, Uuid)> = Vec::new();
 
         for (uuid, call) in self.calls.iter_mut() {
@@ -295,7 +299,7 @@ impl Core {
 
             if call.ending {
                 match call.jitter.pop_drain() {
-                    Some(block) => sends.push((ts, block)),
+                    Some(block) => sends.push((ts, call.carrier_num, block)),
                     None => {
                         if let Some(s) = stream {
                             to_release.push((s, *uuid));
@@ -303,18 +307,18 @@ impl Core {
                     }
                 }
             } else if let Some(block) = call.jitter.pop_ready() {
-                sends.push((ts, block));
+                sends.push((ts, call.carrier_num, block));
             }
         }
 
-        for (ts, data) in sends {
+        for (ts, carrier_num, data) in sends {
             queue.push_back(SapMsg::new(
                 Sap::TmdSap,
                 SELF_ENTITY,
                 TetraEntity::Umac,
-                // carrier_num: 0 = primary carrier (single-carrier cell). For a
-                // multi-carrier cell, echo the carrier from NetworkCallReady.
-                SapMsgInner::TmdCircuitDataReq(TmdCircuitDataReq { ts, data, carrier_num: 0 }),
+                // Voice MUST go on the carrier CMCE allocated (from NetworkCallReady),
+                // else UMAC logs "unknown carrier" and falls back to the primary.
+                SapMsgInner::TmdCircuitDataReq(TmdCircuitDataReq { ts, data, carrier_num }),
             ));
         }
         for (stream_id, uuid) in to_release {
@@ -325,10 +329,14 @@ impl Core {
         }
     }
 
-    fn on_network_call_ready(&mut self, queue: &mut MessageQueue, brew_uuid: Uuid, call_id: u16, ts: u8, usage: u8) {
+    fn on_network_call_ready(&mut self, queue: &mut MessageQueue, brew_uuid: Uuid, call_id: u16, carrier_num: u16, ts: u8, usage: u8) {
         if let Some(call) = self.calls.get_mut(&brew_uuid) {
             call.ts = Some(ts);
-            tracing::info!("FlowDmrEntity: call ready uuid={} call_id={} ts={} usage={}", brew_uuid, call_id, ts, usage);
+            call.carrier_num = carrier_num;
+            tracing::info!(
+                "FlowDmrEntity: call ready uuid={} call_id={} carrier={} ts={} usage={}",
+                brew_uuid, call_id, carrier_num, ts, usage
+            );
         } else {
             tracing::warn!("FlowDmrEntity: NetworkCallReady for unknown uuid={} — releasing orphan", brew_uuid);
             queue.push_back(end_msg(brew_uuid));
@@ -414,8 +422,8 @@ impl TetraEntityTrait for FlowDmrEntity {
 
     fn rx_prim(&mut self, queue: &mut MessageQueue, message: SapMsg) {
         match message.msg {
-            SapMsgInner::CmceCallControl(CallControl::NetworkCallReady { brew_uuid, call_id, ts, usage, .. }) => {
-                self.core.on_network_call_ready(queue, brew_uuid, call_id, ts, usage)
+            SapMsgInner::CmceCallControl(CallControl::NetworkCallReady { brew_uuid, call_id, carrier_num, ts, usage }) => {
+                self.core.on_network_call_ready(queue, brew_uuid, call_id, carrier_num, ts, usage)
             }
             SapMsgInner::CmceCallControl(CallControl::NetworkCallEnd { brew_uuid }) => {
                 self.core.on_network_call_end(brew_uuid)
@@ -519,8 +527,8 @@ mod tests {
             _ => panic!("no NetworkCallStart"),
         };
 
-        // 2) CMCE allocates resources on ts=2.
-        core.on_network_call_ready(&mut q, uuid, 0x100, 2, 0);
+        // 2) CMCE allocates resources on carrier=1584, ts=2.
+        core.on_network_call_ready(&mut q, uuid, 0x100, 1584, 2, 0);
         assert!(drain(&mut q).is_empty());
 
         // 3) Feed enough voice to clear the jitter priming threshold.
@@ -541,6 +549,7 @@ mod tests {
             msgs.iter().find(|m| matches!(m.msg, SapMsgInner::TmdCircuitDataReq(_)))
         {
             assert_eq!(req.ts, 2);
+            assert_eq!(req.carrier_num, 1584); // echoed from NetworkCallReady
             assert_eq!(req.data.len(), TMD_PACKED_BYTES); // 35-byte ACELP block
         }
 
