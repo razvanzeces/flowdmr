@@ -63,6 +63,11 @@ pub struct Config {
     pub pcm_gain: f32,
     /// UDP port dsd-neo streams 8 kHz PCM to (its `-o udp:127.0.0.1:<port>`).
     pub dsd_pcm_port: u16,
+    /// dsd-neo emits **stereo** 8 kHz audio over UDP even in DMR mono mode (its
+    /// `-w` wav is "stereo 8000 Hz" too). We take the left channel. If your
+    /// decoder build emits a true mono UDP stream, set this false — otherwise a
+    /// mono stream read as stereo (or vice-versa) sounds garbled / wrong-speed.
+    pub dsd_audio_stereo: bool,
 
     // ── IPC to the FlowStation entity ──────────────────────────────────────
     /// Address of the FlowStation FlowDMR entity (its `FLOWDMR_LISTEN`).
@@ -116,6 +121,7 @@ impl Default for Config {
             volume: 2,
             pcm_gain: 1.0,
             dsd_pcm_port: 23470,
+            dsd_audio_stereo: true,
             entity_addr: "127.0.0.1:23471".to_string(),
             record_enabled: true,
             record_dir: "/var/lib/flowdmr/recordings".to_string(),
