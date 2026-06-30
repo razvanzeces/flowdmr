@@ -235,6 +235,12 @@ const PAGE: &str = r##"<!doctype html>
  .rec .right{display:flex;gap:8px;align-items:center;white-space:nowrap}
  .rec .sz{color:var(--mut);font-size:11px}
  .rec a,.rec button.play{color:var(--acc);text-decoration:none;background:none;border:0;cursor:pointer;font-size:14px;padding:0 2px}
+ .loghead{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+ .loghead h2{margin:0}
+ .qual{margin-left:auto;font-size:12px;font-weight:600}
+ .btn-sm{margin:0;width:auto;padding:5px 12px;font-size:12px;background:#21262d}
+ .hint{color:var(--mut);font-size:12px;margin-top:8px;line-height:1.4}
+ .warn{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.35);color:#f5a3a0;border-radius:8px;padding:8px 10px;margin-top:10px;font-size:12px;display:none}
  @media(max-width:640px){.grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
  <h1>FlowDMR</h1><p class="sub">DMR → TETRA local injector — control panel</p>
@@ -249,7 +255,9 @@ const PAGE: &str = r##"<!doctype html>
    </form>
    <div class="lvl"><span class="k">Audio level (into ACELP)</span><span class="clip" id="clip">—</span></div>
    <div class="meter"><span id="lvlbar"></span></div>
-   <div class="lvl"><span class="k" id="dbfs">— dBFS</span><span class="k">aim for peaks below −3, never CLIP</span></div>
+   <div class="lvl"><span class="k" id="dbfs">— dBFS</span><span class="k">aim for peaks ≈ −8, never CLIP</span></div>
+   <div class="warn" id="rfwarn">⚠ RF overload (CLIP) in the log — lower the Tuner gain until it clears. Strong RF clipping corrupts the decode.</div>
+   <div class="hint">Tune by the data: keep the <b>audio bar</b> peaking ≈ −8 dBFS (green) with no CLIP, and watch the <b>log</b> — fewer red errors = cleaner voice.</div>
   </div>
   <div class="card"><h2>Status</h2>
    <div class="row"><span class="k">Decoder</span><span class="v"><span id="dec_dot" class="dot off"></span><span id="dec">—</span></span></div>
@@ -263,7 +271,10 @@ const PAGE: &str = r##"<!doctype html>
    <div id="errwrap" style="margin-top:10px;display:none"><span class="k" style="color:var(--bad)">Error</span> <code id="err"></code></div>
   </div>
  </div>
- <div class="card logcard"><h2>Live decoder log (dsd-neo)</h2><pre class="log" id="log">waiting for decoder…</pre></div>
+ <div class="card logcard">
+  <div class="loghead"><h2>Live decoder log</h2><span class="qual" id="qual">—</span><button class="btn-sm" id="copylog" type="button">Copy</button></div>
+  <pre class="log" id="log">waiting for decoder…</pre>
+ </div>
  <div class="card logcard"><h2>Recordings</h2>
   <audio id="player" controls style="width:100%;margin-bottom:10px"></audio>
   <div id="recs" class="recs">—</div>
@@ -300,13 +311,37 @@ function render(s){
  }
 }
 async function poll(){try{const r=await fetch('/api/status');render(await r.json());}catch(e){}}
+let lastLog='';
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+const ANSI={31:'#f85149',32:'#3fb950',33:'#d29922',34:'#2f81f7',35:'#c678dd',36:'#56b6c2'};
+function ansi(t){
+ t=esc(t);let open=false;
+ t=t.replace(/\x1b\[(\d+)m/g,(_,c)=>{c=+c;
+  if(c===0){const r=open?'</span>':'';open=false;return r;}
+  if(ANSI[c]){const r=(open?'</span>':'')+'<span style="color:'+ANSI[c]+'">';open=true;return r;}
+  return '';});
+ return open?t+'</span>':t;
+}
+function decodeQuality(raw){
+ const lines=raw.split('\n').slice(-60).filter(l=>l.trim());
+ if(!lines.length)return['—','var(--mut)'];
+ const err=lines.filter(l=>/ERR|Sync Err|no sync/i.test(l)).length;
+ const p=Math.round(100*(1-err/lines.length));
+ return[p+'% clean',p>=80?'#3fb950':(p>=50?'#d29922':'#f85149')];
+}
 async function pollLog(){try{
- const t=await (await fetch('/api/log')).text();
+ const t=await (await fetch('/api/log')).text();lastLog=t;
  const el=document.getElementById('log');
  const atBottom=el.scrollTop+el.clientHeight>=el.scrollHeight-30;
- el.textContent=t||'(no decoder output yet)';
+ el.innerHTML=ansi(t)||'(no decoder output yet)';
  if(atBottom)el.scrollTop=el.scrollHeight;
+ const [ql,qc]=decodeQuality(t);const q=document.getElementById('qual');q.textContent='decode '+ql;q.style.color=qc;
+ document.getElementById('rfwarn').style.display=/RF Level CLIP/i.test(t)?'block':'none';
 }catch(e){}}
+document.getElementById('copylog').onclick=()=>{
+ const clean=lastLog.replace(/\x1b\[\d+m/g,'');
+ navigator.clipboard.writeText(clean).then(()=>{const b=document.getElementById('copylog');b.textContent='Copied!';setTimeout(()=>b.textContent='Copy',1200);});
+};
 document.getElementById('f').addEventListener('submit',async e=>{
  e.preventDefault();
  const b=new URLSearchParams();
