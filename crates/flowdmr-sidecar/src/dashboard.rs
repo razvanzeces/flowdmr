@@ -115,15 +115,19 @@ fn apply_control(cfg: &SharedConfig, body: &str) {
         let v = v.trim();
         match k {
             "freq_mhz" => {
-                if let Ok(mhz) = v.parse::<f64>() {
-                    if mhz > 0.0 {
+                // Accept a dot OR comma decimal separator; reject out-of-band values
+                // (e.g. a locale mangling "439.4000" into "4394000").
+                if let Ok(mhz) = v.replace(',', ".").parse::<f64>() {
+                    if (1.0..=3000.0).contains(&mhz) {
                         live.rx_freq_hz = (mhz * 1_000_000.0).round() as u64;
+                    } else {
+                        tracing::warn!("flowdmr-sidecar: ignoring out-of-range frequency {mhz} MHz");
                     }
                 }
             }
             "gain_db" => {
-                if let Ok(g) = v.parse::<f32>() {
-                    live.gain_db = g;
+                if let Ok(g) = v.replace(',', ".").parse::<f32>() {
+                    live.gain_db = g.clamp(0.0, 60.0);
                 }
             }
             "ppm" => {
@@ -306,10 +310,10 @@ const PAGE: &str = r##"<!doctype html>
    <h2>Receiver</h2>
    <form id="f">
     <div class="frow">
-     <div><label>RX frequency (MHz)</label><input id="freq_mhz" type="number" step="0.000001" placeholder="439.4000"></div>
-     <div><label>Tuner gain (dB · 0 = auto)</label><input id="gain_db" type="number" step="0.1" placeholder="20"></div>
-     <div><label>PPM correction</label><input id="ppm" type="number" step="1" placeholder="0"></div>
-     <div><label>Injection TalkGroup (GSSI)</label><input id="injection_tg" type="number" step="1" placeholder="9"></div>
+     <div><label>RX frequency (MHz)</label><input id="freq_mhz" type="text" inputmode="decimal" autocomplete="off" placeholder="439.4000"></div>
+     <div><label>Tuner gain (dB · 0 = auto)</label><input id="gain_db" type="text" inputmode="decimal" autocomplete="off" placeholder="20"></div>
+     <div><label>PPM correction</label><input id="ppm" type="text" inputmode="numeric" autocomplete="off" placeholder="0"></div>
+     <div><label>Injection TalkGroup (GSSI)</label><input id="injection_tg" type="text" inputmode="numeric" autocomplete="off" placeholder="9"></div>
     </div>
     <button class="apply" type="submit">Apply &amp; retune</button>
    </form>
