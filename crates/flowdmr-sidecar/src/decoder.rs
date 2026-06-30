@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use crate::config::SharedConfig;
 use crate::meta::MetaParser;
 use crate::session::CallManager;
-use crate::status::SharedStatus;
+use crate::status::{SharedLog, SharedStatus};
 use crate::wire::UdpSink;
 
 /// Build the dsd-neo argument vector from current settings.
@@ -44,6 +44,7 @@ pub fn run(
     cm: Arc<Mutex<CallManager>>,
     mut sink: UdpSink,
     status: SharedStatus,
+    log: SharedLog,
     start: Instant,
 ) {
     let parser = match MetaParser::new(&cfg.static_cfg.re_source, &cfg.static_cfg.re_talkgroup, &cfg.static_cfg.re_call_end) {
@@ -93,6 +94,7 @@ pub fn run(
         loop {
             match rx.recv_timeout(Duration::from_millis(150)) {
                 Ok(line) => {
+                    log.push(&line); // live tail for the dashboard
                     let m = parser.parse_line(&line);
                     if !m.is_empty() {
                         let now_ms = start.elapsed().as_millis() as u64;

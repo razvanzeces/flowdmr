@@ -54,6 +54,9 @@ pub fn run(
             let frame: Vec<i16> = acc.drain(..PCM_SAMPLES_PER_FRAME).collect();
             let now_ms = start.elapsed().as_millis() as u64;
             let tg = cfg.live().injection_tg;
+            // Level meter: peak of what the ACELP encoder actually receives.
+            let peak = frame.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0).min(32767) as i16;
+            let clipped = peak >= 32760;
             {
                 let mut mgr = cm.lock().expect("cm lock");
                 mgr.on_pcm(frame, tg, now_ms, &mut sink);
@@ -61,6 +64,10 @@ pub fn run(
             status.update(|s| {
                 s.pcm_frames += 1;
                 s.seconds_since_pcm = Some(0);
+                s.pcm_peak = if peak > s.pcm_peak { peak } else { (s.pcm_peak as f32 * 0.9) as i16 };
+                if clipped {
+                    s.pcm_clip = s.pcm_clip.wrapping_add(1);
+                }
             });
         }
     }

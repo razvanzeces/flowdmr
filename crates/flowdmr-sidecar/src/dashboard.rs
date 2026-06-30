@@ -12,9 +12,9 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 
 use crate::config::{LiveSettings, SharedConfig};
-use crate::status::SharedStatus;
+use crate::status::{SharedLog, SharedStatus};
 
-pub fn run(bind: &str, cfg: SharedConfig, status: SharedStatus) -> std::io::Result<()> {
+pub fn run(bind: &str, cfg: SharedConfig, status: SharedStatus, log: SharedLog) -> std::io::Result<()> {
     let listener = TcpListener::bind(bind)?;
     tracing::info!("flowdmr-sidecar: mini-dashboard on http://{bind}");
     for stream in listener.incoming() {
@@ -22,8 +22,9 @@ pub fn run(bind: &str, cfg: SharedConfig, status: SharedStatus) -> std::io::Resu
             Ok(s) => {
                 let cfg = cfg.clone();
                 let status = status.clone();
+                let log = log.clone();
                 std::thread::spawn(move || {
-                    if let Err(e) = handle(s, &cfg, &status) {
+                    if let Err(e) = handle(s, &cfg, &status, &log) {
                         tracing::trace!("flowdmr-sidecar: dashboard conn error: {e}");
                     }
                 });
@@ -34,7 +35,7 @@ pub fn run(bind: &str, cfg: SharedConfig, status: SharedStatus) -> std::io::Resu
     Ok(())
 }
 
-fn handle(mut stream: TcpStream, cfg: &SharedConfig, status: &SharedStatus) -> std::io::Result<()> {
+fn handle(mut stream: TcpStream, cfg: &SharedConfig, status: &SharedStatus, log: &SharedLog) -> std::io::Result<()> {
     let mut buf = [0u8; 8192];
     let n = stream.read(&mut buf)?;
     let req = String::from_utf8_lossy(&buf[..n]);
@@ -50,6 +51,7 @@ fn handle(mut stream: TcpStream, cfg: &SharedConfig, status: &SharedStatus) -> s
             let body = status_json(cfg, status);
             respond(&mut stream, "200 OK", "application/json", &body)
         }
+        ("GET", "/api/log") => respond(&mut stream, "200 OK", "text/plain; charset=utf-8", &log.tail(120)),
         ("POST", "/api/control") => {
             let body = req.split("\r\n\r\n").nth(1).unwrap_or("");
             apply_control(cfg, body);
@@ -117,10 +119,16 @@ fn status_json(cfg: &SharedConfig, status: &SharedStatus) -> String {
         Some(e) => format!("\"{}\"", json_escape(e)),
         None => "null".into(),
     };
+    let peak_dbfs = if s.pcm_peak <= 0 {
+        -99.0
+    } else {
+        20.0 * (s.pcm_peak as f32 / 32768.0).log10()
+    };
     format!(
         "{{\"decoder_running\":{},\"decoder_pid\":{},\"decoder_restarts\":{},\
          \"pcm_frames\":{},\"active_call\":{},\"current_source\":{},\"calls_total\":{},\
          \"last_meta_line\":\"{}\",\"last_error\":{},\
+         \"peak_dbfs\":{:.1},\"pcm_clip\":{},\
          \"freq_hz\":{},\"gain_db\":{},\"ppm\":{},\"injection_tg\":{}}}",
         s.decoder_running,
         pid,
@@ -131,6 +139,8 @@ fn status_json(cfg: &SharedConfig, status: &SharedStatus) -> String {
         s.calls_total,
         json_escape(&s.last_meta_line),
         err,
+        peak_dbfs,
+        s.pcm_clip,
         rx_freq_hz,
         gain_db,
         ppm,
@@ -174,6 +184,14 @@ const PAGE: &str = r##"<!doctype html>
  .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
  .live{background:rgba(63,185,80,.15);color:var(--ok)}.idle{background:rgba(139,151,167,.15);color:var(--mut)}
  code{color:var(--mut);font-size:12px;word-break:break-all}
+ .meter{height:14px;border-radius:7px;background:#0b0f14;border:1px solid var(--line);overflow:hidden;margin-top:4px}
+ .meter>span{display:block;height:100%;width:0;transition:width .1s linear}
+ .lvl{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+ .clip{font-size:12px;font-weight:700;color:var(--mut)}.clip.hot{color:var(--bad)}
+ .logcard{margin-top:16px}
+ pre.log{margin:0;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:10px;height:320px;overflow:auto;
+   font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;color:#c9d4e0;white-space:pre-wrap;word-break:break-word}
+ @media(max-width:640px){.grid{grid-template-columns:1fr}}
 </style></head><body><div class="wrap">
  <h1>FlowDMR</h1><p class="sub">DMR → TETRA local injector — control panel</p>
  <div class="grid">
@@ -185,6 +203,9 @@ const PAGE: &str = r##"<!doctype html>
     <label>Injection TalkGroup (TETRA GSSI)</label><input id="injection_tg" type="number" step="1" placeholder="5000">
     <button type="submit">Apply</button>
    </form>
+   <div class="lvl"><span class="k">Audio level (into ACELP)</span><span class="clip" id="clip">—</span></div>
+   <div class="meter"><span id="lvlbar"></span></div>
+   <div class="lvl"><span class="k" id="dbfs">— dBFS</span><span class="k">aim for peaks below −3, never CLIP</span></div>
   </div>
   <div class="card"><h2>Status</h2>
    <div class="row"><span class="k">Decoder</span><span class="v"><span id="dec_dot" class="dot off"></span><span id="dec">—</span></span></div>
@@ -194,14 +215,23 @@ const PAGE: &str = r##"<!doctype html>
    <div class="row"><span class="k">PCM frames</span><span class="v" id="pcm">0</span></div>
    <div class="row"><span class="k">Restarts</span><span class="v" id="restarts">0</span></div>
    <div class="row"><span class="k">Inject GSSI</span><span class="v" id="tg">—</span></div>
-   <div style="margin-top:12px"><span class="k">Last decoder line</span><br><code id="meta">—</code></div>
+   <div style="margin-top:12px"><span class="k">Last call line</span><br><code id="meta">—</code></div>
    <div id="errwrap" style="margin-top:10px;display:none"><span class="k" style="color:var(--bad)">Error</span> <code id="err"></code></div>
   </div>
  </div>
+ <div class="card logcard"><h2>Live decoder log (dsd-neo)</h2><pre class="log" id="log">waiting for decoder…</pre></div>
 </div>
 <script>
 let dirty=false;
 ['freq_mhz','gain_db','ppm','injection_tg'].forEach(id=>document.getElementById(id).addEventListener('input',()=>dirty=true));
+function meter(dbfs,clip){
+ const pct=Math.max(0,Math.min(100,(dbfs+60)/60*100));            // -60..0 dBFS -> 0..100%
+ const col = dbfs>=-1?'#f85149':(dbfs>=-6?'#d29922':'#3fb950');
+ const bar=document.getElementById('lvlbar');bar.style.width=pct+'%';bar.style.background=col;
+ document.getElementById('dbfs').textContent=(dbfs<=-99?'silence':dbfs.toFixed(1)+' dBFS');
+ const c=document.getElementById('clip');
+ if(clip>0){c.textContent='CLIP ×'+clip;c.className='clip hot';}else{c.textContent='no clip';c.className='clip';}
+}
 function render(s){
  document.getElementById('dec_dot').className='dot '+(s.decoder_running?'on':'off');
  document.getElementById('dec').textContent=s.decoder_running?('running (pid '+s.decoder_pid+')'):'stopped';
@@ -213,6 +243,7 @@ function render(s){
  document.getElementById('tg').textContent=s.injection_tg;
  document.getElementById('meta').textContent=s.last_meta_line||'—';
  const ew=document.getElementById('errwrap');if(s.last_error){ew.style.display='';document.getElementById('err').textContent=s.last_error;}else ew.style.display='none';
+ meter(s.peak_dbfs,s.pcm_clip);
  if(!dirty){
   document.getElementById('freq_mhz').value=(s.freq_hz/1e6).toFixed(4);
   document.getElementById('gain_db').value=s.gain_db;
@@ -221,6 +252,13 @@ function render(s){
  }
 }
 async function poll(){try{const r=await fetch('/api/status');render(await r.json());}catch(e){}}
+async function pollLog(){try{
+ const t=await (await fetch('/api/log')).text();
+ const el=document.getElementById('log');
+ const atBottom=el.scrollTop+el.clientHeight>=el.scrollHeight-30;
+ el.textContent=t||'(no decoder output yet)';
+ if(atBottom)el.scrollTop=el.scrollHeight;
+}catch(e){}}
 document.getElementById('f').addEventListener('submit',async e=>{
  e.preventDefault();
  const b=new URLSearchParams();
@@ -228,6 +266,7 @@ document.getElementById('f').addEventListener('submit',async e=>{
  const r=await fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:b.toString()});
  dirty=false;render(await r.json());
 });
-poll();setInterval(poll,1000);
+poll();setInterval(poll,500);
+pollLog();setInterval(pollLog,700);
 </script>
 </body></html>"##;

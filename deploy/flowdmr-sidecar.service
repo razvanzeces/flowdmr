@@ -1,26 +1,21 @@
 [Unit]
 Description=FlowDMR sidecar (DMR -> TETRA local injector)
-Documentation=https://github.com/razvanzeces/flowstation
-# Start after FlowStation so the IPC entity socket is already listening.
-After=network-online.target bluestation-bs.service
+Documentation=https://github.com/razvanzeces/flowdmr
+# Start after FlowStation so the entity's IPC socket is already listening.
+After=network-online.target tetra.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Adjust paths to where you installed the binary and config.
+# Runs as root (like tetra.service) so the RTL-SDR USB device and dsd-neo just work.
+# PATH must include /usr/local/bin so the child dsd-neo is found.
+Environment=PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=RUST_LOG=info
 ExecStart=/usr/local/bin/flowdmr-sidecar --config /etc/flowdmr/sidecar.toml
 Restart=on-failure
 RestartSec=3
-# dsd-neo needs USB (RTL-SDR) access; run as a user in the plugdev group.
-User=flowdmr
-Group=plugdev
-Environment=RUST_LOG=info
-# Localhost-only service; lock it down.
-NoNewPrivileges=true
-ProtectSystem=strict
-ReadWritePaths=/etc/flowdmr
-ProtectHome=true
-PrivateTmp=true
+StandardOutput=append:/var/log/flowdmr/flowdmr.log
+StandardError=append:/var/log/flowdmr/flowdmr.log
 
 [Install]
 WantedBy=multi-user.target

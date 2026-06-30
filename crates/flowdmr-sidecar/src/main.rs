@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 
 use config::{Config, SharedConfig};
 use session::CallManager;
-use status::SharedStatus;
+use status::{SharedLog, SharedStatus};
 use wire::UdpSink;
 
 fn main() {
@@ -91,6 +91,7 @@ fn main() {
 
     let shared = SharedConfig::new(cfg, config_path);
     let status = SharedStatus::new();
+    let log = SharedLog::new(200);
     let cm = Arc::new(Mutex::new(CallManager::new(shared.static_cfg.fixed_source_id)));
     let start = Instant::now();
 
@@ -104,11 +105,11 @@ fn main() {
 
     // Decoder supervisor (also drives metadata parsing).
     {
-        let (cfg, cm, status, start) = (shared.clone(), cm.clone(), status.clone(), start);
+        let (cfg, cm, status, log, start) = (shared.clone(), cm.clone(), status.clone(), log.clone(), start);
         let sink = base_sink.try_clone().expect("clone sink");
         std::thread::Builder::new()
             .name("flowdmr-decoder".into())
-            .spawn(move || decoder::run(cfg, cm, sink, status, start))
+            .spawn(move || decoder::run(cfg, cm, sink, status, log, start))
             .expect("spawn decoder thread");
     }
 
@@ -161,7 +162,7 @@ fn main() {
     );
 
     // Dashboard on the main thread (blocking).
-    if let Err(e) = dashboard::run(&shared.static_cfg.dashboard_bind, shared.clone(), status) {
+    if let Err(e) = dashboard::run(&shared.static_cfg.dashboard_bind, shared.clone(), status, log) {
         tracing::error!("flowdmr-sidecar: dashboard failed: {e}");
         std::process::exit(1);
     }

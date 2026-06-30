@@ -69,7 +69,9 @@ pub struct Config {
     pub entity_addr: String,
 
     // ── Mini-dashboard ─────────────────────────────────────────────────────
-    /// Bind address for the control dashboard.
+    /// Bind address for the control dashboard. 0.0.0.0 = reachable from the LAN
+    /// (e.g. http://<pi-ip>:8081). NOTE: no auth — only expose on a trusted
+    /// network; use 127.0.0.1 to restrict it to the Pi itself.
     pub dashboard_bind: String,
 
     // ── Call detection ─────────────────────────────────────────────────────
@@ -107,7 +109,7 @@ impl Default for Config {
             pcm_gain: 0.8,
             dsd_pcm_port: 23470,
             entity_addr: "127.0.0.1:23471".to_string(),
-            dashboard_bind: "127.0.0.1:8081".to_string(),
+            dashboard_bind: "0.0.0.0:8081".to_string(),
             silence_timeout_ms: 1200,
             fixed_source_id: 1,
             // Defaults tuned for common dsd-fme / dsd-neo console output. Adjust
