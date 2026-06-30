@@ -47,8 +47,9 @@ pub struct Config {
     pub dsd_extra_args: Vec<String>,
     /// RTL-SDR device index (as understood by dsd-neo's `rtl:<dev>:...`).
     pub rtl_device: u32,
-    /// RTL bandwidth field (kHz) in the `rtl:` input string. 12 suits a single
-    /// narrowband DMR channel; the dsd-neo docs use 48 for P25/DMR trunk scans.
+    /// RTL DSP bandwidth (kHz) in the `rtl:` input string. MUST give an integer
+    /// samples-per-symbol for DMR (4800 sym/s): 24 -> SPS 5, 48 -> SPS 10. Do NOT
+    /// use 12 (SPS 2.5 — dsd-neo can't sync reliably).
     pub rtl_bandwidth_khz: u32,
     /// Squelch level passed to dsd-neo (0 = open).
     pub squelch: u32,
@@ -89,7 +90,7 @@ impl Default for Config {
             dsd_mode_args: vec!["-fs".to_string(), "-nm".to_string()],
             dsd_extra_args: vec![],
             rtl_device: 0,
-            rtl_bandwidth_khz: 12,
+            rtl_bandwidth_khz: 24,
             squelch: 0,
             volume: 2,
             dsd_pcm_port: 23470,
