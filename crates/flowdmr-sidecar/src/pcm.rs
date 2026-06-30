@@ -64,7 +64,9 @@ pub fn run(
             status.update(|s| {
                 s.pcm_frames += 1;
                 s.seconds_since_pcm = Some(0);
-                s.pcm_peak = if peak > s.pcm_peak { peak } else { (s.pcm_peak as f32 * 0.9) as i16 };
+                // Slow peak-hold decay (~0.26 dB/frame) so the bar shows the voice
+                // peak, not the floor between syllables.
+                s.pcm_peak = if peak > s.pcm_peak { peak } else { (s.pcm_peak as f32 * 0.97) as i16 };
                 if clipped {
                     s.pcm_clip = s.pcm_clip.wrapping_add(1);
                 }
