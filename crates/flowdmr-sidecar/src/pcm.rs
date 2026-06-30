@@ -28,6 +28,8 @@ pub fn run(
     tracing::info!("flowdmr-sidecar: PCM ingest listening on 127.0.0.1:{port}");
     let mut buf = [0u8; 4096];
     let mut acc: Vec<i16> = Vec::with_capacity(PCM_SAMPLES_PER_FRAME * 4);
+    let gain = cfg.static_cfg.pcm_gain;
+    let apply_gain = (gain - 1.0).abs() > 1e-4;
 
     loop {
         let len = match socket.recv(&mut buf) {
@@ -37,10 +39,14 @@ pub fn run(
                 continue;
             }
         };
-        // Decode whole s16 little-endian samples.
+        // Decode whole s16 little-endian samples (optionally attenuate for ACELP headroom).
         let mut i = 0;
         while i + 1 < len {
-            acc.push(i16::from_le_bytes([buf[i], buf[i + 1]]));
+            let mut s = i16::from_le_bytes([buf[i], buf[i + 1]]);
+            if apply_gain {
+                s = (s as f32 * gain).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+            }
+            acc.push(s);
             i += 2;
         }
 

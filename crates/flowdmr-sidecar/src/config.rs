@@ -53,8 +53,14 @@ pub struct Config {
     pub rtl_bandwidth_khz: u32,
     /// Squelch level passed to dsd-neo (0 = open).
     pub squelch: u32,
-    /// Sample volume multiplier passed to dsd-neo.
+    /// Sample volume multiplier passed to dsd-neo. Keep at 1 — higher values clip
+    /// voice peaks, which then re-encode badly through ACELP (breath/noise survives,
+    /// voice goes robotic).
     pub volume: u32,
+    /// Linear gain applied to the decoded PCM in the sidecar BEFORE it is sent to
+    /// the entity. < 1.0 gives the ACELP encoder headroom so formant peaks don't
+    /// clip (try 0.6–0.8 if voice sounds robotic but breath/noise is clean).
+    pub pcm_gain: f32,
     /// UDP port dsd-neo streams 8 kHz PCM to (its `-o udp:127.0.0.1:<port>`).
     pub dsd_pcm_port: u16,
 
@@ -97,7 +103,8 @@ impl Default for Config {
             rtl_device: 0,
             rtl_bandwidth_khz: 24,
             squelch: 0,
-            volume: 2,
+            volume: 1,
+            pcm_gain: 0.8,
             dsd_pcm_port: 23470,
             entity_addr: "127.0.0.1:23471".to_string(),
             dashboard_bind: "127.0.0.1:8081".to_string(),
