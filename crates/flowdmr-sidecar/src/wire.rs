@@ -13,9 +13,13 @@ pub struct UdpSink {
 
 impl UdpSink {
     /// Create a sink bound to an ephemeral local port, "connected" to `dest` so
-    /// every `send` goes to the entity. Localhost only in practice.
+    /// every `send` goes to the entity. Binds `0.0.0.0` (not loopback) so the OS
+    /// picks the right outbound interface — this is what lets the decoder run on
+    /// a SEPARATE machine and stream audio to FlowStation over the LAN (needed
+    /// when the BTS's own TX desensitises a co-located RTL-SDR). Works for a
+    /// localhost `dest` too: the loopback route is still chosen automatically.
     pub fn connect(dest: &str) -> std::io::Result<Self> {
-        let socket = UdpSocket::bind("127.0.0.1:0")?;
+        let socket = UdpSocket::bind("0.0.0.0:0")?;
         let addr = dest
             .to_socket_addrs()?
             .next()

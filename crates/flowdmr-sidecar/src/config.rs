@@ -71,6 +71,10 @@ pub struct Config {
 
     // ── IPC to the FlowStation entity ──────────────────────────────────────
     /// Address of the FlowStation FlowDMR entity (its `FLOWDMR_LISTEN`).
+    /// `127.0.0.1:23471` when the sidecar runs ON the BTS; set to the BTS's LAN
+    /// IP (e.g. `192.168.1.50:23471`) to run the decoder on a SEPARATE machine
+    /// and stream audio over the LAN — required when the BTS TX kills a
+    /// co-located RTL-SDR. The entity must then listen on `0.0.0.0:23471`.
     pub entity_addr: String,
 
     // ── Call recording ─────────────────────────────────────────────────────
